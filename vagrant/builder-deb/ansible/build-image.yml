@@ -90,13 +90,13 @@
         mode: 0777
         remote_src: true
     
-    - name: Copy custom init
-      copy:
-        src: /tmp/sbin_init
-        dest: /tmp/initrd/sbin/init
-        force: true
-        mode: 0777
-        remote_src: true
+    # - name: Copy custom init
+    #   copy:
+    #     src: /tmp/sbin_init
+    #     dest: /tmp/initrd/sbin/init
+    #     force: true
+    #     mode: 0777
+    #     remote_src: true
 
     - name: edit etc/inittab
       lineinfile:

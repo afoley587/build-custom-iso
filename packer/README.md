@@ -14,13 +14,13 @@ https://wiki.debian.org/DebianInstaller/Preseed/EditIso#Extracting_the_Initrd_fr
 ```shell
 # use this to include the preseed in the iso
 export INCLUDE_PRESEED=1
-ISO_NAME="st_exchange_mini.iso"
+ISO_NAME="custom_iso.iso"
 PACKER_IMAGE="base-image.json"
 PACKER_DIR="$PWD"
 VAGRANT_DIR="$PACKER_DIR/../vagrant"
-S3_BUCKET="sporttrade-devops-public"
+S3_BUCKET="your-s3-bucket"
 if [[ "$INCLUDE_PRESEED" == "1" ]]; then
-    ISO_NAME="st_exchange_mini_with_preseed.iso"
+    ISO_NAME="custom_iso_with_preseed.iso"
     PACKER_IMAGE="base-image-preseed.json"
 fi
 
@@ -36,12 +36,6 @@ cd "$VAGRANT_DIR/builder-deb" && vagrant up
 vagrant scp default:/tmp/custom_iso.iso "$PACKER_DIR/base-deb/$ISO_NAME"
 aws s3 cp "$PACKER_DIR/base-deb/$ISO_NAME" "s3://$S3_BUCKET/$ISO_NAME" --acl public-read
 ISO_CHKSUM=$(sha256sum "$PACKER_DIR/base-deb/$ISO_NAME" | cut -d' ' -f1)
-echo "CHECKSUM FOR DRP: ${ISO_CHKSUM}"
-
-# To check isos on DRPCLI
-# https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-nocloud-amd64-20210329-591.tar.xz
-# ssh sporttrade@mgmt.dc1.pa.sporttrade.systems
-# sudo ls /var/lib/dr-provision/tftpboot/isos
 ```
 
 # Recalculate checksum and build the base image locally (for testing)

@@ -1,0 +1,6 @@
+packer_output
+*.iso
+packer_cache
+.vagrant
+.packer
+*.tar.gz

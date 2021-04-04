@@ -1,0 +1,133 @@
+---
+# yamllint disable rule:line-length
+- name: Build the base image
+  hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: Download the ISO
+      get_url:
+        dest: /tmp/firmware-iso.iso
+        url: http://ftp.debian.org/debian/dists/buster/main/installer-amd64/current/images/netboot/mini.iso
+
+    - name: Add to sources.list
+      become: true
+      apt_repository:
+        repo: deb http://ftp.de.debian.org/debian buster main non-free
+        state: present
+
+
+    - name: Update all packages to their latest version
+      become: true
+      apt:
+        name: "*"
+        state: latest
+
+    - name: apt installs
+      become: true
+      apt:
+        name:
+          - p7zip-full
+          - firmware-bnx2
+          - firmware-bnx2x
+          - genisoimage
+
+    - name: Setup directories
+      file:
+        state: directory
+        path: "{{ item }}"
+      loop:
+        - "/tmp/initrd"
+        - "/tmp/initrd/lib/firmware"
+        - "/tmp/initrd/newroot"
+
+    - name: remove old /tmp/custom_iso if exists
+      file:
+        path: /tmp/custom_iso/
+        state: absent
+
+    - name: Extract ISO
+      shell: 7z x -o/tmp/custom_iso/ /tmp/firmware-iso.iso
+
+    - name: Copy initial initrd to new location
+      copy:
+        remote_src: true
+        src: /tmp/custom_iso/initrd.gz
+        dest: /tmp/initrd/initrd.gz
+
+    - name: Extract the initrd
+      shell: gunzip < initrd.gz | cpio --extract --preserve --verbose
+      args:
+        chdir: /tmp/initrd
+      register: cpio_decompress
+      failed_when: (cpio_decompress.rc != 0) and (cpio_decompress.rc != 2)
+
+    - name: Remove the old tar
+      file:
+        path: /tmp/initrd/initrd.gz
+        state: absent
+
+    - name: Install firmware binaries in to new initrd
+      copy:
+        src: /lib/firmware/
+        dest: /tmp/initrd/lib/firmware/
+        mode: preserve
+        remote_src: true
+
+    - name: Copy the preseed over
+      copy:
+        src: /tmp/preseed.cfg
+        dest: /tmp/initrd/preseed.cfg
+        mode: preserve
+        remote_src: true
+      when: include_preseed == '1'
+    
+    - name: Copy custom init
+      copy:
+        src: /tmp/init
+        dest: /tmp/initrd/init
+        force: true
+        mode: 0777
+        remote_src: true
+    
+    - name: Copy custom init
+      copy:
+        src: /tmp/sbin_init
+        dest: /tmp/initrd/sbin/init
+        force: true
+        mode: 0777
+        remote_src: true
+
+    - name: edit etc/inittab
+      lineinfile:
+        path: /tmp/initrd/etc/inittab
+        line: "{{ item }}"
+        create: yes
+      loop: 
+        - ttyS0::askfirst:/bin/sh
+        - ttyS0::askfirst:/bin/ash
+
+    - name: Package it all up and copy it to new location
+      shell: |
+        find . | cpio --create --format='newc' | gzip > /tmp/initrd.gz && \
+        for f in $(find /tmp/custom_iso/ -name initrd.gz); do cp /tmp/initrd.gz $f; done
+      args:
+        chdir: /tmp/initrd
+
+    # - name: Create ISO Checksum
+    #   shell: >-
+    #     chmod +w md5sum.txt &&
+    #     find -follow -type f ! -name md5sum.txt -print0 | xargs -0 md5sum > md5sum.txt &&
+    #     chmod -w md5sum.txt
+    #   args:
+    #     chdir: /tmp/custom_iso/
+
+    - name: Create the new ISO
+      shell: |
+        genisoimage -r -J -b \
+            isolinux.bin \
+            -c boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -o /tmp/custom_iso.iso /tmp/custom_iso

@@ -1,0 +1,411 @@
+#!/bin/ash
+# set -x
+
+fail() {
+    printf '%s\n' "$@"
+    echo "Dropping into shell for debugging"
+    echo "Exiting the shell will reboot the system"
+    /bin/ash
+    reboot
+}
+
+# -----------------------------------------------------------------------------
+# Start "Good from here checks"
+# -----------------------------------------------------------------------------
+export PATH
+. /lib/debian-installer/init-debug
+dbsleep="2"
+debug="1"
+# . /lib/debian-installer/init-debug
+# debugshell "just booted"
+
+echo "STARTING MOUNTS...."
+sleep "$dbsleep"
+mkdir -r 
+mount -t proc proc /proc
+mount -t devtmpfs dev /dev
+mount -t sysfs sysfs /sys
+# mount -t sysfs sysfs /sys
+# mount -t tmpfs /dev/sda1 /newroot
+/lib/debian-installer/start-udev
+echo "MOUNTS ARE FINISHED...."
+sleep "$dbsleep"
+
+echo "STARTING MDEV STEPS...."
+sleep "$dbsleep"
+touch /dev/mdev.log /dev/mdev.seq
+echo "Loading drivers"
+echo '$MODALIAS=.* 0:0 660 @/bin/modprobe "$MODALIAS"' >/etc/mdev.conf
+echo /bin/mdev >/proc/sys/kernel/hotplug
+
+mknod /dev/null c 1 3
+mknod /dev/tty c 5 0
+/bin/mdev -s
+
+echo "MDEV STEPS DONE...."
+sleep "$dbsleep"
+
+echo "STARTING UEVENT AND BUS STEPS...."
+sleep "$dbsleep"
+# Load devices not loaded by mdev -s
+for i in /sys/class/net/*/uevent; do
+    printf 'add' > "$i";
+done 2>/dev/null;
+unset i
+for i in /sys/bus/usb/devices/*; do
+    case "${i##*/}" in
+        [0-9]*-[0-9]*)
+            printf 'add' > "$i/uevent";;
+    esac
+done; unset i
+echo "UEVENT AND BUS STEPS DONE...."
+sleep "$dbsleep"
+
+echo "STARTING MODPROBE STEPS...."
+sleep "$dbsleep"
+# Load kernel modules, run twice.
+find /sys -name 'modalias' -type f -exec cat '{}' + | sort -u | xargs -n 1 modprobe  2>/dev/null
+find /sys -name 'modalias' -type f -exec cat '{}' + | sort -u | xargs -n 1 modprobe  2>/dev/null
+modprobe 8021q
+# If we loaded mlx4_core, also load mlx4_en
+if test -d /sys/module/mlx4_core; then
+    modprobe mlx4_en
+    mdev -s
+fi
+echo "MODPROBE STEPS DONE...."
+sleep "$dbsleep"
+
+echo "PARSING /PROC/CMDLINE PART I...."
+sleep "$dbsleep"
+echo "Parsing kernel parameters required for booting"
+bootif=$(grep -o 'BOOTIF=[^ ]*' /proc/cmdline)
+nextone=$(grep -o 'provisioner.web=[^ ]*' /proc/cmdline)
+portdelay=$(grep -o 'provisioner.portdelay=[^ ]*' /proc/cmdline)
+postportdelay=$(grep -o 'provisioner.postportdelay=[^ ]*' /proc/cmdline)
+routedelay=$(grep -o 'provisioner.routedelay=[^ ]*' /proc/cmdline)
+wgetretrycount=$(grep -o 'provisioner.wgetretrycount=[^ ]*' /proc/cmdline)
+myip=$(grep -o 'provisioner.ip=[^ ]*' /proc/cmdline)
+mygw=$(grep -o 'provisioner.gw=[^ ]*' /proc/cmdline)
+mymtu=$(grep -o 'provisioner.mtu=[^ ]*' /proc/cmdline)
+myvlan=$(grep -o 'provisioner.vlan=[^ ]*' /proc/cmdline)
+mydns=$(grep -o 'provisioner.dns=[^ ]*' /proc/cmdline)
+interfaces=$(grep -o 'provisioner.interface=[^ ]*' /proc/cmdline)
+echo "/PROC/CMDLINE PART I DONE...."
+sleep "$dbsleep"
+
+echo "PARSING /PROC/CMDLINE PART II...."
+sleep "$dbsleep"
+if [[ $(expr match "$bootif" 'BOOTIF=discovery') != 0 ]] ; then
+  echo "STARTING BOOT DISCOVERY"
+  sleep 5
+  interfaces=${interfaces#*=}
+  if [[ "$interfaces" == "" ]] ; then
+    interfaces="eno3,eno4"
+  fi
+  echo "STARTING IF SEARCH"
+
+  sleep 5
+  for i in $(echo $interfaces | sed 's/,/ /g') ; do
+    echo "INTERFACE: $i"
+    sleep 5
+     if [ ! -f /sys/class/net/$i/address ] ; then
+       echo "INTERFACE NOT FOUND - SKIPPING: $i"
+       sleep 5
+       continue
+     fi
+     echo "INTERFACE WAS FOUND: $i"
+     sleep 5
+     bootif=$(sed 's/-/:/g' /sys/class/net/$i/address)
+     echo "bootif is set to..... $bootif"
+     sleep "$dbsleep"
+     break
+  done
+else
+  echo "bootif was not discovery!"
+  echo "it was passed in as this $bootif...."
+  cat /proc/cmdline
+  echo "Replacing - with :"
+  bootif=$(echo $bootif | sed 's/-/:/g')
+  echo "bootif is now $bootif"
+  sleep 10
+fi
+echo "/PROC/CMDLINE PART II DONE...."
+sleep "$dbsleep"
+
+echo "PARSING /PROC/CMDLINE PART III...."
+sleep "$dbsleep"
+# test -z "$bootif" && fail "Missing required parameter BOOTIF"
+# test -z "$nextone" && fail "Missing required parameter provisioner.web"
+ip6=$(echo $nextone | grep -o '\[[0-9a-fA-F:]*\]')
+echo "/PROC/CMDLINE PART III DONE...."
+sleep "$dbsleep"
+
+echo "FINDING BOOTIF...."
+sleep "$dbsleep"
+
+# echo "bootif is $bootif before the 01-"
+# sleep 5
+# bootif=${bootif#*01-}
+# echo "bootif is $bootif after the 01-"
+# sleep 5
+# bootif=${bootif//-/:} # <----- causing kernel panics... how does param expansion even do that?
+echo "bootif is $bootif"
+sleep 5
+echo "FOUND BOOTIF...."
+sleep "$dbsleep"
+
+echo "FINDING NEXTONE AND PORTS...."
+sleep "$dbsleep"
+nextone=${nextone#*=}
+portdelay=${portdelay#*=}
+postportdelay=${postportdelay#*=}
+echo "FOUND  NEXTONE AND PORTS...."
+sleep "$dbsleep"
+
+echo "FINDING ROUTE DELAY AND WGET...."
+sleep "$dbsleep"
+routedelay=${routedelay#*=}
+wgetretrycount=${wgetretrycount#*=}
+wgetretrycount=${wgetretrycount:-65}
+echo "FOUND ROUTE DELAY AND WGET...."
+sleep "$dbsleep"
+
+echo "FINDING IP STUFFS...."
+sleep "$dbsleep"
+myip=${myip#*=}
+mygw=${mygw#*=}
+mydns=${mydns#*=}
+myvlan=${myvlan#*=}
+mymtu=${mymtu#*=}
+echo "FOUND IP STUFFS...."
+sleep "$dbsleep"
+
+echo "/PROC/CMDLINE PART III DONE...."
+sleep "$dbsleep"
+
+# -----------------------------------------------------------------------------
+# Verified up to here
+# -----------------------------------------------------------------------------
+echo "STARTING PXEDEV INTERFACE STEPS...."
+sleep "$dbsleep"
+pxedev=""
+pxedevvlan=""
+
+# Setting PXE LAN interface (eno3, eno4, etc.)
+for dev in /sys/class/net/*; do
+    echo "dev is $dev"
+    test -f "$dev/address" || continue
+    echo "bootif: $bootif"
+    echo "dev/address: $(cat $dev/address)"
+    sleep 3
+    # If this device MAC == boot interface MAC, this is the PXE device
+    if test "$(cat "$dev/address")" = "$bootif"; then
+        # Strip leading /sys/class/..../
+        pxedev=${dev##*/}
+        break
+    fi
+done
+
+# test -z "$pxedev" && fail "Failed to find network device we booted from"
+# if a port delay is sent - wait
+test -z "$portdelay" || sleep $portdelay
+echo "Configuring boot interface"
+ip link set "$pxedev" up
+# if a post port delay is sent - wait
+test -z "$postportdelay" || sleep $postportdelay
+
+echo "pxedev: ${pxedev}"
+echo "PXEDEV INTERFACE DONE...."
+sleep "$dbsleep"
+
+echo "STARTING PXEDEV VLAN STEPS...."
+sleep "$dbsleep"
+thedev=${pxedev}
+if [[ "$myvlan" != "" ]] ; then
+  pxedevvlan="${pxedev}.${myvlan}"
+  ip link add link $pxedev name $pxedevvlan type vlan id $myvlan
+  ip link set "$pxedevvlan" up
+  thedev=${pxedevvlan}
+fi
+if [[ "$mymtu" != "" ]] ; then
+  ip link set dev $pxedev mtu $mymtu
+  if [[ "$pxedevvlan" != "" ]] ; then
+    ip link set dev $pxedevvlan mtu $mymtu
+  fi
+fi
+if [[ "$myip" != "" ]] ; then
+  ip ad add $myip dev $thedev
+  ip route add default via $mygw
+else
+  if [[ "$ip6" == "" ]] ; then
+    udhcpc -b -R -a -i "$thedev"
+  else
+    test -z "$routedelay" || sleep $routedelay
+    udhcpc6 -b -R -i "$thedev"
+  fi
+fi
+echo "pxedev: ${pxedevvlan}"
+echo "PXEDEV VLAN DONE...."
+sleep "$dbsleep"
+
+echo "STARTING NEWROOT FS STEPS...."
+sleep "$dbsleep"
+for fs in /dev /dev/pts /proc /sys; do
+    mkdir -p "/newroot$fs"
+    mount --bind "$fs" "/newroot$fs"
+done
+echo "NEWROOT FS STEPS DONE...."
+sleep "$dbsleep"
+
+echo "STARTING SYSTEMD NET STEPS...."
+sleep "$dbsleep"
+# mkdir -p /newroot/etc/systemd/network
+mkdir -p /etc/systemd/network
+{
+echo '[Match]'
+printf 'MACAddress=%s\n\n' "$bootif"
+if [[ "$mymtu" != "" ]] ; then
+echo '[Link]'
+echo "MTUBytes=$mymtu"
+echo
+fi
+echo '[Network]'
+if [[ "$myvlan" == "" ]] ; then
+  if [[ "$myip" == "" ]] ; then
+    if [[ "$ip6" == "" ]] ; then
+      echo 'DHCP=ipv4'
+      echo
+      echo '[DHCPv4]'
+      echo 'ClientIdentifier=mac'
+      echo 'SendDecline=false'
+      echo 'SendRelease=false'
+    else
+      echo 'DHCP=ipv6'
+      echo
+      echo '[DHCPv6]'
+      echo 'ClientIdentifier=mac'
+    fi
+  else
+      echo "Address=${myip}"
+      echo "Gateway=${mygw}"
+      if [[ "$mydns" != "" ]] ; then
+        echo "DNS=$mydns"
+      fi
+  fi
+else
+  echo "DHCP=no"
+  echo "VLAN=myvlan"
+fi
+} > /etc/systemd/network/20-bootif.network
+# /newroot/etc/systemd/network/20-bootif.network
+if [[ "$myvlan" != "" ]] ; then
+  {
+    echo '[NetDev]'
+    echo 'Name=myvlan'
+    echo 'Kind=vlan'
+    echo
+    echo '[VLAN]'
+    echo "Id=$myvlan"
+  } > /etc/systemd/network/myvlan.netdev
+  # /newroot/etc/systemd/network/myvlan.netdev
+  {
+    echo '[Match]'
+    echo 'Name=myvlan'
+    echo
+    if [[ "$mymtu" != "" ]] ; then
+      echo '[Link]'
+      echo "MTUBytes=$mymtu"
+      echo
+    fi
+    echo '[Network]'
+    if [[ "$myip" == "" ]] ; then
+      if [[ "$ip6" == "" ]] ; then
+        echo 'DHCP=ipv4'
+        echo
+        echo '[DHCPv4]'
+        echo 'ClientIdentifier=mac'
+        echo 'SendDecline=false'
+        echo 'SendRelease=false'
+      else
+        echo 'DHCP=ipv6'
+        echo
+        echo '[DHCPv6]'
+        echo 'ClientIdentifier=mac'
+      fi
+    else
+      echo "Address=${myip}"
+      echo "Gateway=${mygw}"
+      if [[ "$mydns" != "" ]] ; then
+        echo "DNS=$mydns"
+      fi
+    fi
+  } > /etc/systemd/network/myvlan.network
+  # /newroot/etc/systemd/network/myvlan.network
+fi
+echo "SYSTEMD NET STEPS DONE...."
+sleep "$dbsleep"
+
+vconfig add eno3 10
+/etc/network/interfaces
+{
+  # Vlan Interface
+  echo 'auto eno3.10'
+  echo 'iface eno3.10 inet static'
+  echo '    address 10.47.0.123'
+  echo '    netmask 255.255.254.0'
+  echo '    gateway 10.47.0.1'
+  echo '    vlan-raw-device eno3'
+  echo '    ip_rp_filter 0'
+} > /etc/network/interfaces
+
+# for file in "/newroot/etc/issue" "/etc/issue.net"; do
+for file in "/etc/issue" "/etc/issue.net"; do
+echo "
+  ####  #####   ####  #####  ##### ##### #####    ##   #####  ###### 
+ #      #    # #    # #    #   #     #   #    #  #  #  #    # #      
+  ####  #    # #    # #    #   #     #   #    # #    # #    # #####  
+      # #####  #    # #####    #     #   #####  ###### #    # #      
+ #    # #      #    # #   #    #     #   #   #  #    # #    # #      
+  ####  #       ####  #    #   #     #   #    # #    # #####  ######                                              
+" > $file
+done
+
+echo "" >/proc/sys/kernel/hotplug
+# pkill -9 here to keep udhcpc from releasing the IP
+# address when we will want it back in a second or two.
+if [[ "$myip" == "" ]] ; then
+  if [[ "$ip6" == "" ]] ; then
+      pkill -9 udhcpc
+  else
+      pkill -9 udhcpc6
+  fi
+else
+  ip route delete default
+  ip a del $myip
+fi
+if [[ "$pxedevvlan" != "" ]] ; then
+  ip link set "$pxedevvlan" down
+  ip link delete "$pxedevvlan"
+fi
+ip link set "$pxedev" down
+
+echo "cute stuff is set...."
+sleep "$dbsleep"
+
+init='/sbin/init'
+# if [[ -x "/newroot/${init}" ]] ; then
+# 	#Unmount all other mounts so that the ram used by
+# 	#the initramfs can be cleared after switch_root
+#   echo "Unmounting....."
+#   sleep "$dbsleep"#
+# 	umount /sys /proc
+#   echo "Unmounted....."
+# 	echo "THERE IS AN SBIN AND IM UNMOUNTED"
+#   sleep "$dbsleep"
+# 	# Switch to the new root and execute init	
+# fi
+
+# exec switch_root /newroot "${init}"
+exec /usr/sbin/chroot . /bin/busybox init < /dev/console > /dev/console 2>&1
+# echo "Failed to switch_root, dropping to a shell"
+# exec /bin/ash

@@ -1,0 +1,152 @@
+{
+  "variables": {
+    "boot_wait": "5s",
+    "disk_size": "10000",
+    "iso_checksum": "4bcb68e9e14db4ba40eb50b4242b373cddde6489bd755374b9f500b4fe475b00",
+    "iso_url": "https://sporttrade-devops-public.s3.us-east-2.amazonaws.com/st_exchange_mini.iso",
+    "memsize": "2048",
+    "numvcpus": "2",
+    "build_identifier": "debug",
+    "output_directory": "packer_output",
+    "ssh_username": "vagrant",
+    "ssh_password": "vagrant",
+    "ssh_timeout": "120m"
+  },
+  "builders": [
+    {
+      "name": "qemu",
+      "output_directory": "{{ user `output_directory` }}/{{.BuildName}}",
+      "type": "qemu",
+      "accelerator": "kvm",
+      "cpus": 2,
+      "memory": 2048,
+      "shutdown_timeout": "10m",
+      "qemuargs": [
+        ["-cpu", "host"],
+        ["-soundhw", "hda"],
+        ["-device", "virtio-net,netdev=user.0"],
+        ["-device", "virtio-serial-pci"],
+        ["-chardev", "socket,path=/tmp/{{.Name}}-qga.sock,server,nowait,id=qga0"],
+        ["-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0"],
+	      ["-display", "vnc=password=off"]
+      ],
+      "headless": true,
+      "format": "qcow2",
+      "disk_size": "{{user `disk_size`}}",
+      "disk_interface": "virtio",
+      "net_device": "virtio-net",
+      "iso_checksum": "{{ user `iso_checksum` }}",
+      "iso_url": "{{ user `iso_url` }}",
+      "ssh_username": "{{user `ssh_username`}}",
+      "ssh_password": "{{user `ssh_password`}}",
+      "ssh_timeout": "{{user `ssh_timeout`}}",
+
+      "http_directory": "http",
+
+      "boot_wait": "{{ user `boot_wait` }}",
+
+      "boot_command": [
+        "<esc><wait>",
+        "install preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed-helloworld.cfg ",
+        "debian-installer=en_US auto locale=en_US kbd-chooser/method=us ",
+        "netcfg/get_hostname={{ .Name }} ",
+        "netcfg/get_domain=vagrantup.com fb=false debconf/frontend=noninteractive console-setup/ask_detect=false ",
+        "console-keymaps-at/keymap=us keyboard-configuration/xkb-keymap=us  <enter><wait>"
+      ]
+    },
+    {
+      "name": "qemu-mac",
+      "output_directory": "{{ user `output_directory` }}/{{.BuildName}}",
+      "type": "qemu",
+      "cpus": 2,
+      "memory": 2048,
+      "shutdown_timeout": "10m",
+      "headless": false,
+      "format": "qcow2",
+      "disk_size": "{{user `disk_size`}}",
+      "disk_interface": "virtio",
+      "net_device": "virtio-net",
+      "iso_checksum": "{{ user `iso_checksum` }}",
+      "iso_url": "{{ user `iso_url` }}",
+      "ssh_username": "{{user `ssh_username`}}",
+      "ssh_password": "{{user `ssh_password`}}",
+      "ssh_timeout": "{{user `ssh_timeout`}}",
+      "qemuargs": [
+	      ["-display", "cocoa"]
+      ],
+      "http_directory": "http",
+
+      "boot_wait": "{{ user `boot_wait` }}",
+
+      "boot_command": [
+        "<esc><wait>",
+        "install preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed-helloworld.cfg ",
+        "debian-installer=en_US auto locale=en_US kbd-chooser/method=us ",
+        "netcfg/get_hostname={{ .Name }} ",
+        "netcfg/get_domain=vagrantup.com fb=false debconf/frontend=noninteractive console-setup/ask_detect=false ",
+        "console-keymaps-at/keymap=us keyboard-configuration/xkb-keymap=us  <enter><wait>"
+      ]
+    },
+    {
+      "name": "vbox",
+      "boot_command": [
+        "<esc><wait>",
+        "auto ",
+        "netcfg/enable=true console-setup/charmap=UTF-8 ",
+        "console-keymaps-at/keymap=us popularity-contest/participate=false ",
+        "passwd/root-login=false keyboard-configuration/xkb-keymap=us",
+        "debian-installer/locale=en_US.utf8 locale=en_US ",
+        "netcfg/get_domain=unassigned-domain console-setup/ask_detect=false ",
+        "netcfg/get_hostname={{ .Name }} console-setup/layoutcode=us ",
+        "keyboard-configuration/layoutcode=us hw-detect/load_firmware=true ",
+        " debconf/frontend=noninteractive console-setup/ask_detect=false ",
+        "rw quiet netcfg/dhcp_timeout=120 netcfg/choose_interface=auto ",
+        "<enter><wait>"
+      ],
+      "boot_wait": "{{ user `boot_wait` }}",
+      "guest_os_type": "Debian_64",
+      "guest_additions_mode": "disable",
+      "headless": true,
+      "cpus": "{{ user `numvcpus` }}",
+      "memory": "{{ user `memsize` }}",
+      "http_directory": "http",
+      "iso_checksum": "{{ user `iso_checksum` }}",
+      "iso_url": "{{ user `iso_url` }}",
+      "communicator": "none",
+      "disable_shutdown": true,
+      "output_directory": "{{ user `output_directory` }}/{{.BuildName}}",
+      "shutdown_timeout": "10m",
+      "type": "virtualbox-iso",
+      "vboxmanage": [
+        ["storagectl", "{{.Name}}", "--name", "IDE Controller", "--remove"],
+        ["modifyvm", "{{.Name}}", "--vrde", "off"],
+        ["modifyvm", "{{.Name}}", "--graphicscontroller", "vboxsvga"],
+        ["modifyvm", "{{.Name}}", "--vram", "128"],
+        ["modifyvm", "{{.Name}}", "--accelerate3d", "on"],
+        ["modifyvm", "{{.Name}}", "--usb", "on"],
+        ["modifyvm", "{{.Name}}", "--mouse", "usbtablet"],
+        ["modifyvm", "{{.Name}}", "--audio", "none"],
+        ["modifyvm", "{{.Name}}", "--nictype1", "82540EM"],
+        ["modifyvm", "{{.Name}}", "--nictype2", "82540EM"],
+        ["modifyvm", "{{.Name}}", "--nictype3", "82540EM"],
+        ["modifyvm", "{{.Name}}", "--nictype4", "82540EM"]
+      ],
+      "virtualbox_version_file": "",
+      "disk_size": "{{user `disk_size`}}",
+      "hard_drive_interface": "sata",
+      "iso_interface": "sata"
+    }
+  ],
+  "post-processors": [
+    {
+      "type": "vagrant",
+      "provider_override": "virtualbox",
+      "output": "{{ user `output_directory` }}/packer_{{.BuildName}}_{{.Provider}}.box"
+    },
+    {
+      "type" : "compress",
+      "format": "tar.gz",
+      "output": "{{ user `output_directory` }}/{{.BuildName}}.tar.gz"
+    }
+  ]
+}
